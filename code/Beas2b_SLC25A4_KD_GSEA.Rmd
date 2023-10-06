@@ -100,7 +100,18 @@ biotypes <- unique(lfcInfo$biotype)[c(1,3,17,19,21)]
 lfcInfo_filtered <- lfcInfo %>%
   dplyr::filter(biotype %in% biotypes)
 
+lfcInfo_filtered <- lfcInfo_filtered %>%
+  dplyr::filter(
+    log2FoldChange <= 0.5
+  )
+
+write_csv(
+  lfcInfo_filtered,
+  path = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/lfc_filtered.csv"
+)
 ```
+
+This output table represents log2 fold change of ANT1 KO cells as compared to WT, filtered for genomic annotation and p-value <= 0.5. 
 
 ```{r GSEA}
 
