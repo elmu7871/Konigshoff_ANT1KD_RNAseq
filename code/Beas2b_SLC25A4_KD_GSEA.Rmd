@@ -146,6 +146,11 @@ gsea_BP <- gseGO(
 
 view(as.data.frame(gsea_BP))
 
+write_csv(
+  as.data.frame(gsea_BP),
+  path = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/gsea_results.csv"
+)
+
 gseaplot(
   gsea_BP, 
   geneSetID = 13
