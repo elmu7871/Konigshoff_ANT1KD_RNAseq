@@ -12,7 +12,9 @@ library(tidyverse)
 library(BiocManager)
 library(DESeq2)
 library(dplyr)
-library(fgsea)
+library(clusterProfiler)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
 ```
 
 ```{r build geneInfo}
@@ -113,6 +115,39 @@ write_csv(
 
 This output table represents log2 fold change of ANT1 KO cells as compared to WT, filtered for genomic annotation and p-value <= 0.5. 
 
-```{r GSEA}
+```{r GO}
+# using only significantly enriched genes
+enriched_genes <- rownames(res_bleo[res_bleo$log2FoldChange >= 0.5,])
 
+GO_results <- as.data.frame(enrichGO(
+  gene = enriched_genes,
+  OrgDb = "org.Hs.eg.db",
+  keyType = "ENSEMBL",
+  ont = "BP"
+))
+
+view(GO_results)
+```
+
+```{r GSEA}
+pre_gsea <- res_bleo[res_bleo$baseMean > 50,]
+pre_gsea <- pre_gsea[order(-pre_gsea$log2FoldChange),]
+
+gene_list <- pre_gsea$log2FoldChange
+names(gene_list) <- rownames(pre_gsea)
+
+gsea_BP <- gseGO(
+  geneList = gene_list,
+  ont = "BP",
+  keyType = "ENSEMBL",
+  OrgDb = "org.Hs.eg.db",
+  eps = 1e-300
+)
+
+view(as.data.frame(gsea_BP))
+
+gseaplot(
+  gsea_BP, 
+  geneSetID = 13
+)
 ```
