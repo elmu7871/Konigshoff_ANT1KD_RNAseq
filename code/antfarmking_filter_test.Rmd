@@ -1,0 +1,171 @@
+---
+title: "test"
+author: "Libby Murphy"
+date: "2023-10-09"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(BiocManager)
+library(DESeq2)
+library(dplyr)
+library(clusterProfiler)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+```
+
+```{r build geneInfo}
+geneInfo <- read_csv("/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/accessories/gencode.v26.primary.info.csv.zip", col_names = F)
+
+colnames(geneInfo) <- c("gene_id", "transcript_id", "biotype", "symbol")
+
+geneInfo$gene_id <- sapply(
+  strsplit(
+    geneInfo$gene_id,".", fixed = T
+  ),
+  function(x) x[1]
+)
+
+geneInfo <- geneInfo[,c(1,3,4)] %>% unique()
+```
+
+```{r read in file and build DESeq object}
+antfarmking <- read_tsv("/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/data/GSE244305_Ant1ko_bleo_study_gene_count.txt") %>%
+  as.data.frame()
+
+rownames(antfarmking) <- antfarmking[,1]
+
+coldata <- data.frame(matrix(nrow = length(colnames(antfarmking)[c(2:4, 8:10)]),
+                             ncol = 2)
+                      )
+coldata <- data.frame(
+  "sample" = colnames(antfarmking[c(2:4, 8:10)])
+) %>%
+  separate(
+    col = sample, 
+    into = c("condition", "tx", "rep")
+  )
+
+
+for (i in 1:nrow(coldata)) {
+  print(paste(coldata$condition[i], coldata$tx[i], coldata$rep[i], sep = "_"))
+}
+
+rownames(coldata) <- tmp
+
+coldata$condition <- factor(coldata$condition, levels = c("WT", "A1KO"))
+coldata$rep <- factor(coldata$rep, levels = c("1", "2", "3"))
+
+stopifnot(
+  all(colnames(antfarmking[,c(2:4, 8:10)]) %in% rownames(coldata)) == TRUE & 
+  all(colnames(antfarmking[,c(2:4, 8:10)]) == rownames(coldata)) == TRUE
+)
+
+
+
+dds_ANT1KD <- DESeqDataSetFromMatrix(
+  countData = antfarmking[,c(2:4, 8:10)],
+  colData = coldata,
+  design = ~ condition
+)
+
+dds_ANT1KD$condition <- factor(dds_ANT1KD$condition, levels = c("WT", "A1KO"))
+
+keep <- rowSums(counts(dds_ANT1KD)) >= 10
+dds_ANT1KD <- dds_ANT1KD[keep,]
+
+dds_ANT1KD <- DESeq(dds_ANT1KD)
+
+resultsNames(dds_ANT1KD)
+
+res_bleo <- results(dds_ANT1KD, contrast = c("condition", "A1KO", "WT"))
+```
+
+```{r QC}
+# Extract normalized counts from DESeqDataSet
+normalized_counts <- counts(dds_ANT1KD, normalized = TRUE)
+
+# Perform variance stabilizing transformation (VST) on the counts
+vst_data <- vst(dds_ANT1KD)
+
+# Extract the first two principal components
+pc_data <- data.frame(prcomp(assay(vst_data))$x[, 1:2])
+
+# Combine with sample metadata
+sample_info <- colData(dds_ANT1KD)
+pc_data <- cbind(pc_data, sample_info)
+
+# Plot PCA
+ggplot(pc_data, aes(x = PC1, y = PC2, color = tx)) +
+  geom_point() +
+  labs(title = "PCA Plot of DESeq2 Results", x = "Principal Component 1", y = "Principal Component 2")
+
+plotMA(dds_ANT1KD)
+```
+
+```{r filter genes}
+biotypes <- unique(lfcInfo$biotype)[c(1,3,17,19,21)]
+
+lfcInfo_filtered <- lfcInfo %>%
+  dplyr::filter(biotype %in% biotypes)
+
+lfcInfo_filtered <- lfcInfo_filtered %>%
+  dplyr::filter(
+    log2FoldChange <= 0.5
+  )
+
+lfcInfo[grepl(pattern = "NFE2L2", lfcInfo$symbol),]
+lfcInfo[grepl(pattern = "TXNRD1", lfcInfo$symbol),]
+
+write_csv(
+  lfcInfo_filtered,
+  path = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/lfc_filtered.csv"
+)
+```
+
+This output table represents log2 fold change of ANT1 KO cells as compared to WT, filtered for genomic annotation and p-value <= 0.5. 
+
+```{r GO}
+# using only significantly enriched genes
+enriched_genes <- rownames(res_bleo[res_bleo$log2FoldChange >= 0.5,])
+
+GO_results <- as.data.frame(enrichGO(
+  gene = enriched_genes,
+  OrgDb = "org.Hs.eg.db",
+  keyType = "ENSEMBL",
+  ont = "BP"
+))
+
+view(GO_results)
+```
+
+```{r GSEA}
+pre_gsea <- res_bleo[res_bleo$baseMean > 50,]
+pre_gsea <- pre_gsea[order(-pre_gsea$log2FoldChange),]
+
+gene_list <- pre_gsea$log2FoldChange
+names(gene_list) <- rownames(pre_gsea)
+
+gsea_BP <- gseGO(
+  geneList = gene_list,
+  ont = "BP",
+  keyType = "ENSEMBL",
+  OrgDb = "org.Hs.eg.db",
+  eps = 1e-300
+)
+
+view(as.data.frame(gsea_BP))
+
+write_csv(
+  as.data.frame(gsea_BP),
+  path = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/gsea_results.csv"
+)
+
+gseaplot(
+  gsea_BP, 
+  geneSetID = 13
+)
+```

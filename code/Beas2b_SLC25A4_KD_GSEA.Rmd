@@ -1,7 +1,7 @@
 ---
-title: "Beas-2b SLC25A4 KD GSEA"
+title: "Beas-2b SLC25A4 KO GSEA"
 author: "Libby Murphy"
-date: "2023-10-05"
+date: `r Sys.Date()`
 output: html_document
 editor_options: 
   chunk_output_type: console
@@ -15,32 +15,74 @@ library(dplyr)
 library(clusterProfiler)
 library(AnnotationDbi)
 library(org.Hs.eg.db)
+library(ggplot2)
+library(GenomicFeatures)
+library(biomaRt)
 ```
 
-```{r build geneInfo}
-geneInfo <- read_csv("/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/accessories/gencode.v26.primary.info.csv.zip", col_names = F)
-
-colnames(geneInfo) <- c("gene_id", "transcript_id", "biotype", "symbol")
-
-geneInfo$gene_id <- sapply(
-  strsplit(
-    geneInfo$gene_id,".", fixed = T
-  ),
-  function(x) x[1]
-)
-
-geneInfo <- geneInfo[,c(1,3,4)] %>% unique()
-```
-
-```{r read in file and build DESeq object}
+```{r build geneInfo and antfarmking, echo = FALSE}
 antfarmking <- read_tsv("/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/data/GSE244305_Ant1ko_bleo_study_gene_count.txt") %>%
   as.data.frame()
 
+colnames(antfarmking) <- colnames(antfarmking) %>%
+  gsub(pattern = "Bleo", replacement = "bleo")
+
 rownames(antfarmking) <- antfarmking[,1]
 
+mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
+
+genes <- antfarmking$gene_id
+
+geneInfo <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","hgnc_symbol"),values=genes,mart= mart)
+
+colnames(geneInfo) <- c("gene_id", "symbol")
+```
+
+```{r PCA plot QC}
+qcinput <- antfarmking[,(2:13)] %>% 
+  as.matrix()
+
+qcinput <- log2(qcinput[rowSums(qcinput) > 20,] + 1)
+
+pca_data <- prcomp(qcinput, center = T, scale. = T) 
+
+pca_data_info <- summary(pca_data) 
+
+pca_plot_data <- data.frame(pca_data$rotation) 
+
+pca_plot_data$ID <- rownames(pca_plot_data)
+
+pca_plot_data <- pca_plot_data %>% 
+  separate(col = ID, sep = "_", into = c("genotype","bleo","rep"))
+
+labelPosition <- pca_plot_data %>% 
+  group_by(genotype, bleo, rep) %>% 
+  dplyr::select(PC1, PC2) %>% 
+  summarise(mPC1=mean(PC1), mPC2=mean(PC2))
+
+myCols <- c("darkgrey",
+            RColorBrewer::brewer.pal(n = 8, name = "Blues")[6],
+            RColorBrewer::brewer.pal(n = 6, name = "Reds")[c(3,6)])
+
+
+
+PCAplot <- ggplot(pca_plot_data, aes(x=PC1, y=PC2, color = bleo, shape = rep)) +
+  geom_point(size=3) + 
+  theme_classic() +
+  ggtitle("PCA of Konigshoff Beas-2b ANT1 KO") +
+  scale_color_manual(values = myCols) +
+  xlab(paste("PC1 (%",100*round(pca_data_info$importance[2,1], digits = 3),")", sep = "")) +
+  ylab(paste("PC2 (%",100*round(pca_data_info$importance[2,2], digits = 3),")", sep = "")) 
+PCAplot
+
+# ggplot2::ggsave(filename = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/PCAplot_QC.png", plot = PCAplot, device = "png")
+```
+
+```{r build DESeq object}
 coldata <- data.frame(matrix(nrow = length(colnames(antfarmking)[2:13]),
                              ncol = 2)
                       )
+
 coldata <- data.frame(
   "sample" = colnames(antfarmking[2:13])
 ) %>%
@@ -65,9 +107,9 @@ stopifnot(
   all(colnames(antfarmking[,2:13]) %in% rownames(coldata)) == TRUE & 
   all(colnames(antfarmking[,2:13]) == rownames(coldata)) == TRUE
 )
+```
 
-
-
+``` {r deseq}
 dds_ANT1KD <- DESeqDataSetFromMatrix(
   countData = antfarmking[,2:13],
   colData = coldata,
@@ -77,6 +119,7 @@ dds_ANT1KD <- DESeqDataSetFromMatrix(
 dds_ANT1KD$condition <- factor(dds_ANT1KD$condition, levels = c("WT", "A1KO"))
 
 keep <- rowSums(counts(dds_ANT1KD)) >= 10
+
 dds_ANT1KD <- dds_ANT1KD[keep,]
 
 dds_ANT1KD <- DESeq(dds_ANT1KD)
@@ -84,39 +127,18 @@ dds_ANT1KD <- DESeq(dds_ANT1KD)
 resultsNames(dds_ANT1KD)
 
 res_bleo <- results(dds_ANT1KD, contrast = c("condition", "A1KO", "WT"))
-
-res_bleo <- res_bleo %>%
-  as.data.frame() %>%
-  rownames_to_column(var = "gene_id")
-
-lfcInfo <- dplyr::left_join(
-  res_bleo,
-  geneInfo,
-  by = "gene_id"
-)[,c(9,1:8)]
 ```
-
-```{r filter genes}
-biotypes <- unique(lfcInfo$biotype)[c(1,3,17,19,21)]
-
-lfcInfo_filtered <- lfcInfo %>%
-  dplyr::filter(biotype %in% biotypes)
-
-lfcInfo_filtered <- lfcInfo_filtered %>%
-  dplyr::filter(
-    log2FoldChange <= 0.5
-  )
-
-write_csv(
-  lfcInfo_filtered,
-  path = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/lfc_filtered.csv"
-)
-```
-
-This output table represents log2 fold change of ANT1 KO cells as compared to WT, filtered for genomic annotation and p-value <= 0.5. 
 
 ```{r GO}
 # using only significantly enriched genes
+tmp <- res_bleo[!is.na(res_bleo$padj),]
+tmp <- tmp[(tmp$padj <= 0.05),]
+tmp <- tmp[(tmp$log2FoldChange >= 0.5),]
+tmp <- tmp %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "gene_id")
+left_join(tmp, geneInfo, by = "gene_id")
+
 enriched_genes <- rownames(res_bleo[res_bleo$log2FoldChange >= 0.5,])
 
 GO_results <- as.data.frame(enrichGO(
@@ -126,7 +148,7 @@ GO_results <- as.data.frame(enrichGO(
   ont = "BP"
 ))
 
-view(GO_results)
+# view(GO_results)
 ```
 
 ```{r GSEA}
@@ -144,12 +166,12 @@ gsea_BP <- gseGO(
   eps = 1e-300
 )
 
-view(as.data.frame(gsea_BP))
-
-write_csv(
-  as.data.frame(gsea_BP),
-  path = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/gsea_results.csv"
-)
+# view(as.data.frame(gsea_BP))
+# 
+# write_csv(
+#   as.data.frame(gsea_BP),
+#   path = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/gsea_results.csv"
+# )
 
 gseaplot(
   gsea_BP, 
