@@ -9,6 +9,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(here)
 library(readr)
 library(BiocManager)
 library(DESeq2)
@@ -21,21 +22,21 @@ library(GenomicFeatures)
 library(biomaRt)
 ```
 
-```{r build geneInfo and antfarmking}
-antfarmking <- read_tsv("/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/data/GSE244305_Ant1ko_bleo_study_gene_count.txt") %>%
+```{r build geneInfo and counts_data}
+counts_data <- read_tsv(here("data", "GSE244305_Ant1ko_bleo_study_gene_count.txt")) %>%
   as.data.frame()
 
-colnames(antfarmking) <- colnames(antfarmking) %>%
+colnames(counts_data) <- colnames(counts_data) %>%
   gsub(pattern = "Bleo", replacement = "bleo")
 
-# saveRDS(antfarmking, file = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/accessories/antfarmking.RDS")
-# break glass in case of read_tsv() meltdown
+# saveRDS(counts_data, file = here("accessories", "counts_data.RDS"))
+# sometimes read_tsv doesn't work for an unknown reason--read in rds instead if needed
 
-rownames(antfarmking) <- antfarmking[,1]
+rownames(counts_data) <- counts_data[,1]
 
 mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
 
-genes <- antfarmking$gene_id
+genes <- counts_data$gene_id
 
 geneInfo <- getBM(filters= "ensembl_gene_id", attributes= c("ensembl_gene_id","hgnc_symbol"),values=genes,mart= mart)
 
@@ -43,7 +44,7 @@ colnames(geneInfo) <- c("gene_id", "symbol")
 ```
 
 ```{r PCA plot QC}
-qcinput <- antfarmking[,(2:13)] %>% 
+qcinput <- counts_data[,(2:13)] %>% 
   as.matrix()
 
 qcinput <- log2(qcinput[rowSums(qcinput) > 20,] + 1)
@@ -69,7 +70,6 @@ myCols <- c("darkgrey",
             RColorBrewer::brewer.pal(n = 6, name = "Reds")[c(3,6)])
 
 
-
 PCAplot <- ggplot(pca_plot_data, aes(x=PC1, y=PC2, color = bleo, shape = genotype)) +
   geom_point(size=3) + 
   theme_classic() +
@@ -80,16 +80,16 @@ PCAplot <- ggplot(pca_plot_data, aes(x=PC1, y=PC2, color = bleo, shape = genotyp
 
 PCAplot
 
-# ggplot2::ggsave(filename = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/PCAplot_QC.png", plot = PCAplot, device = "png")
+# ggplot2::ggsave(filename = here("results", "PCAplot_QC.png"), plot = PCAplot, device = "png")
 ```
 
-```{r build DESeq object}
-coldata <- data.frame(matrix(nrow = length(colnames(antfarmking)[2:13]),
+```{r build DESeq object and metadata}
+coldata <- data.frame(matrix(nrow = length(colnames(counts_data)[2:13]),
                              ncol = 2)
                       )
 
 coldata <- data.frame(
-  "sample" = colnames(antfarmking[2:13])
+  "sample" = colnames(counts_data[2:13])
 ) %>%
   separate(
     col = sample, 
@@ -97,21 +97,21 @@ coldata <- data.frame(
   )
 
 
-rownames(coldata) <- colnames(antfarmking)[2:13]
+rownames(coldata) <- colnames(counts_data)[2:13]
 
 coldata$condition <- factor(coldata$condition, levels = c("WT", "A1KO"))
 coldata$tx <- factor(coldata$tx, levels = c("ctrl", "bleo"))
 coldata$rep <- factor(coldata$rep, levels = c("1", "2", "3"))
 
 stopifnot(
-  all(colnames(antfarmking[,2:13]) %in% rownames(coldata)) == TRUE & 
-  all(colnames(antfarmking[,2:13]) == rownames(coldata)) == TRUE
+  all(colnames(counts_data[,2:13]) %in% rownames(coldata)) == TRUE & 
+  all(colnames(counts_data[,2:13]) == rownames(coldata)) == TRUE
 )
 ```
 
-``` {r deseq}
+``` {r deseq and results}
 dds_ANT1KD <- DESeqDataSetFromMatrix(
-  countData = antfarmking[,2:13],
+  countData = counts_data[,2:13],
   colData = coldata,
   design = ~ condition
 )
@@ -165,13 +165,6 @@ gsea_BP <- gseGO(
   OrgDb = "org.Hs.eg.db",
   eps = 1e-300
 )
-
-# view(as.data.frame(gsea_BP))
-# 
-# write_csv(
-#   as.data.frame(gsea_BP),
-#   path = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/gsea_results.csv"
-# )
 
 gseaplot(
   gsea_BP, 
