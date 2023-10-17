@@ -9,6 +9,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(readr)
 library(BiocManager)
 library(DESeq2)
 library(dplyr)
@@ -20,12 +21,15 @@ library(GenomicFeatures)
 library(biomaRt)
 ```
 
-```{r build geneInfo and antfarmking, echo = FALSE}
+```{r build geneInfo and antfarmking}
 antfarmking <- read_tsv("/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/data/GSE244305_Ant1ko_bleo_study_gene_count.txt") %>%
   as.data.frame()
 
 colnames(antfarmking) <- colnames(antfarmking) %>%
   gsub(pattern = "Bleo", replacement = "bleo")
+
+# saveRDS(antfarmking, file = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/accessories/antfarmking.RDS")
+# break glass in case of read_tsv() meltdown
 
 rownames(antfarmking) <- antfarmking[,1]
 
@@ -66,7 +70,7 @@ myCols <- c("darkgrey",
 
 
 
-PCAplot <- ggplot(pca_plot_data, aes(x=PC1, y=PC2, color = bleo, shape = rep)) +
+PCAplot <- ggplot(pca_plot_data, aes(x=PC1, y=PC2, color = bleo, shape = genotype)) +
   geom_point(size=3) + 
   theme_classic() +
   ggtitle("PCA of Konigshoff Beas-2b ANT1 KO") +
