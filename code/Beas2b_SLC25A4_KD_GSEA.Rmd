@@ -77,6 +77,7 @@ PCAplot <- ggplot(pca_plot_data, aes(x=PC1, y=PC2, color = bleo, shape = genotyp
   scale_color_manual(values = myCols) +
   xlab(paste("PC1 (%",100*round(pca_data_info$importance[2,1], digits = 3),")", sep = "")) +
   ylab(paste("PC2 (%",100*round(pca_data_info$importance[2,2], digits = 3),")", sep = "")) 
+
 PCAplot
 
 # ggplot2::ggsave(filename = "/Users/libbymurphy/Documents/GitHub/Konigshoff_ANT1KD_RNAseq/results/PCAplot_QC.png", plot = PCAplot, device = "png")
@@ -95,11 +96,6 @@ coldata <- data.frame(
     into = c("condition", "tx", "rep")
   )
 
-coldata$tx <- coldata$tx %>%
-  gsub(
-    pattern = "Bleo",
-    replacement = "bleo"
-  )
 
 rownames(coldata) <- colnames(antfarmking)[2:13]
 
