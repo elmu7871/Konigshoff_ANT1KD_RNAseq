@@ -34,6 +34,12 @@ colnames(counts_data) <- colnames(counts_data) %>%
 
 rownames(counts_data) <- counts_data[,1]
 
+keep <- rowSums(counts_data[,2:13]) >= 10 # banana change this so it's filtering before building deseq object
+
+counts_data <- counts_data[keep,]
+
+
+
 mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
 
 genes <- counts_data$gene_id
@@ -113,33 +119,46 @@ stopifnot(
 dds_ANT1KD <- DESeqDataSetFromMatrix(
   countData = counts_data[,2:13],
   colData = coldata,
-  design = ~ condition
+  design = ~ condition + tx 
 )
 
 dds_ANT1KD$condition <- factor(dds_ANT1KD$condition, levels = c("WT", "A1KO"))
-
-keep <- rowSums(counts(dds_ANT1KD)) >= 10
-
-dds_ANT1KD <- dds_ANT1KD[keep,]
+dds_ANT1KD$tx <- factor(dds_ANT1KD$tx, levels = c("ctrl", "bleo"))
+dds_ANT1KD$rep <- factor(dds_ANT1KD$rep, levels = c(1, 2, 3))
 
 dds_ANT1KD <- DESeq(dds_ANT1KD)
 
 resultsNames(dds_ANT1KD)
 
-res_bleo <- results(dds_ANT1KD, contrast = c("condition", "A1KO", "WT"))
+res_condition <- results(dds_ANT1KD, contrast = c("condition", "A1KO", "WT"))
+
+res_bleo <- results(dds_ANT1KD, contrast = c("tx", "bleo", "ctrl"))
+```
+
+```{r exploring results}
+res_condition_filt <- res_condition[!is.na(res_condition$padj),] %>%
+  as.data.frame() %>%
+  dplyr::filter(padj <= 0.05) 
+
+res_condition_ex <- res_condition[!is.na(res_condition$padj),] %>%
+  as.data.frame() %>%
+  dplyr::filter(padj <= 0.05) %>%
+  rownames_to_column(var = "gene_id") %>%
+  left_join(geneInfo, by = "gene_id")
+view(res_condition_ex)
 ```
 
 ```{r GO}
 # using only significantly enriched genes
-tmp <- res_bleo[!is.na(res_bleo$padj),]
-tmp <- tmp[(tmp$padj <= 0.05),]
-tmp <- tmp[(tmp$log2FoldChange >= 0.5),]
-tmp <- tmp %>%
-  as.data.frame() %>%
-  rownames_to_column(var = "gene_id")
-left_join(tmp, geneInfo, by = "gene_id")
+# tmp <- res_condition_filt[!is.na(res_bleo$padj),]
+# tmp <- tmp[(tmp$padj <= 0.05),]
+# tmp <- tmp[(tmp$log2FoldChange >= 0.5),]
+# tmp <- tmp %>%
+#   as.data.frame() %>%
+#   rownames_to_column(var = "gene_id")
+# left_join(tmp, geneInfo, by = "gene_id")
 
-enriched_genes <- rownames(res_bleo[res_bleo$log2FoldChange >= 0.5,])
+enriched_genes <- rownames(res_condition_filt[res_condition_filt$log2FoldChange >= 0.5,])
 
 GO_results <- as.data.frame(enrichGO(
   gene = enriched_genes,
@@ -152,7 +171,7 @@ GO_results <- as.data.frame(enrichGO(
 ```
 
 ```{r GSEA}
-pre_gsea <- res_bleo[res_bleo$baseMean > 50,]
+pre_gsea <- res_condition[res_condition$baseMean > 50,]
 pre_gsea <- pre_gsea[order(-pre_gsea$log2FoldChange),]
 
 gene_list <- pre_gsea$log2FoldChange
